@@ -7,6 +7,8 @@ import com.github.lisama569.fleetmissionorchestratorjava.model.PlanStatus;
 import com.github.lisama569.fleetmissionorchestratorjava.model.Robot;
 import com.github.lisama569.fleetmissionorchestratorjava.model.TaskRuntime;
 import com.github.lisama569.fleetmissionorchestratorjava.model.TaskRuntimeView;
+import com.github.lisama569.fleetmissionorchestratorjava.model.TaskSpec;
+import com.github.lisama569.fleetmissionorchestratorjava.model.TimelineEntry;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -26,6 +28,7 @@ public final class FleetState {
     private final Map<String, PlanStatus> planStatus = new TreeMap<>();
     private final Map<String, Map<String, TaskRuntime>> runtimesByPlan = new TreeMap<>();
     private final Map<String, List<DecisionEntry>> decisionsByPlan = new TreeMap<>();
+    private final Map<String, List<TimelineEntry>> timelineByPlan = new TreeMap<>();
     private final Map<String, Long> acceptedTick = new TreeMap<>();
     private final Map<String, Long> lastChangeTick = new TreeMap<>();
     private long tick;
@@ -72,6 +75,21 @@ public final class FleetState {
         }
         runtimesByPlan.put(plan.planId(), rts);
         decisionsByPlan.put(plan.planId(), new ArrayList<>());
+        timelineByPlan.put(plan.planId(), new ArrayList<>());
+    }
+
+    /**
+     * 把一批已校验通过的新任务追加到在跑计划：替换为合并后的计划，
+     * 并为新任务初始化 PENDING 运行时。已有任务的运行时状态一律保留。
+     */
+    public void appendTasks(Plan combinedPlan, List<TaskSpec> newTasks, long atTick) {
+        String planId = combinedPlan.planId();
+        plans.put(planId, combinedPlan);
+        Map<String, TaskRuntime> rts = runtimesByPlan.get(planId);
+        for (TaskSpec t : newTasks) {
+            rts.put(t.taskId(), new TaskRuntime(planId, t));
+        }
+        lastChangeTick.put(planId, atTick);
     }
 
     public Map<String, TaskRuntime> taskRuntimes(String planId) {
@@ -101,6 +119,23 @@ public final class FleetState {
 
     public List<DecisionEntry> decisions(String planId) {
         return List.copyOf(decisionsByPlan.getOrDefault(planId, List.of()));
+    }
+
+    /** 记录一条结构化时间线事件。 */
+    public void recordTimeline(String planId, long tick, String eventType,
+                               String taskId, String robotId, String detail) {
+        timelineByPlan.computeIfAbsent(planId, k -> new ArrayList<>())
+                .add(new TimelineEntry(tick, eventType, planId, taskId, robotId, detail));
+    }
+
+    /**
+     * 按 (tick, 记录顺序) 排序后的执行时间线。事件由单工作线程串行写入，
+     * 相同输入序列重放时内容一致。
+     */
+    public List<TimelineEntry> timeline(String planId) {
+        List<TimelineEntry> entries = new ArrayList<>(timelineByPlan.getOrDefault(planId, List.of()));
+        entries.sort(Comparator.comparingLong(TimelineEntry::tick));
+        return List.copyOf(entries);
     }
 
     public PlanSnapshot snapshot(String planId) {

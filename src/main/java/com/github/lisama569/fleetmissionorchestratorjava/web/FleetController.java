@@ -1,12 +1,17 @@
 package com.github.lisama569.fleetmissionorchestratorjava.web;
 
 import com.github.lisama569.fleetmissionorchestratorjava.model.PlanSnapshot;
+import com.github.lisama569.fleetmissionorchestratorjava.model.TaskSpec;
+import com.github.lisama569.fleetmissionorchestratorjava.model.TimelineEntry;
 import com.github.lisama569.fleetmissionorchestratorjava.orchestrator.FleetOrchestrator;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 仅用于本地演示的只读/控制接口。核心能力由 {@link FleetOrchestrator} 直接驱动并由测试覆盖，
@@ -32,6 +37,20 @@ public class FleetController {
                                @PathVariable String taskId) {
         orchestrator.cancelTask(planId, taskId);
         return orchestrator.snapshot(planId);
+    }
+
+    /** 向在跑计划追加一批任务（整体成功或整体拒绝）。 */
+    @PostMapping("/plans/{planId}/tasks")
+    public PlanSnapshot append(@PathVariable String planId,
+                               @RequestBody List<TaskSpec> newTasks) {
+        orchestrator.appendTasks(planId, newTasks);
+        return orchestrator.snapshot(planId);
+    }
+
+    /** 按模拟时刻排序的执行时间线（复盘/排查用）。 */
+    @GetMapping("/plans/{planId}/timeline")
+    public List<TimelineEntry> timeline(@PathVariable String planId) {
+        return orchestrator.timeline(planId);
     }
 
     @PostMapping("/robots/{robotId}/unavailable")

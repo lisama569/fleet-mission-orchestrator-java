@@ -27,4 +27,14 @@ public record Plan(String planId,
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("no such task: " + taskId));
     }
+
+    /**
+     * 返回在末尾追加了一批新任务的新计划（本记录不可变，原计划不受影响）。
+     * 追加前后的任务顺序保持稳定，保证调度结论可复现。
+     */
+    public Plan withAppendedTasks(java.util.List<TaskSpec> newTasks) {
+        java.util.List<TaskSpec> combined = new java.util.ArrayList<>(tasks);
+        combined.addAll(newTasks);
+        return new Plan(planId, arrivalTick, combined);
+    }
 }

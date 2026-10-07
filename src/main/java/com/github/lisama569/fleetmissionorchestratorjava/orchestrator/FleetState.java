@@ -7,6 +7,9 @@ import com.github.lisama569.fleetmissionorchestratorjava.model.PlanStatus;
 import com.github.lisama569.fleetmissionorchestratorjava.model.Robot;
 import com.github.lisama569.fleetmissionorchestratorjava.model.TaskRuntime;
 import com.github.lisama569.fleetmissionorchestratorjava.model.TaskRuntimeView;
+import com.github.lisama569.fleetmissionorchestratorjava.model.TaskSpec;
+import com.github.lisama569.fleetmissionorchestratorjava.model.TimelineEvent;
+import com.github.lisama569.fleetmissionorchestratorjava.model.TimelineKind;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -28,6 +31,8 @@ public final class FleetState {
     private final Map<String, List<DecisionEntry>> decisionsByPlan = new TreeMap<>();
     private final Map<String, Long> acceptedTick = new TreeMap<>();
     private final Map<String, Long> lastChangeTick = new TreeMap<>();
+    private final List<TimelineEvent> timeline = new ArrayList<>();
+    private long timelineSeq;
     private long tick;
 
     public FleetState(List<Robot> robots) {
@@ -78,6 +83,31 @@ public final class FleetState {
         return runtimesByPlan.getOrDefault(planId, Map.of());
     }
 
+    /**
+     * 用合并后的计划整体替换已接受计划：已有步骤的运行时原样保留（已完成工作不丢），
+     * 仅为新追加的步骤创建运行时。
+     */
+    public void replacePlan(Plan merged, long atTick) {
+        String planId = merged.planId();
+        Map<String, TaskRuntime> rts = runtimesByPlan.get(planId);
+        if (rts == null) {
+            throw new IllegalArgumentException("plan not registered: " + planId);
+        }
+        for (TaskSpec t : merged.tasks()) {
+            rts.putIfAbsent(t.taskId(), new TaskRuntime(planId, t));
+        }
+        plans.put(planId, merged);
+        lastChangeTick.put(planId, atTick);
+    }
+
+    /** 为计划追加运行时（一般由 replacePlan 内部完成）。 */
+    public void registerTaskRuntimes(String planId, List<TaskSpec> added) {
+        Map<String, TaskRuntime> rts = runtimesByPlan.get(planId);
+        for (TaskSpec t : added) {
+            rts.putIfAbsent(t.taskId(), new TaskRuntime(planId, t));
+        }
+    }
+
     /** 跨计划的扁平运行时表，key = planId::taskId。 */
     public Map<String, TaskRuntime> flatRuntimes() {
         Map<String, TaskRuntime> flat = new LinkedHashMap<>();
@@ -101,6 +131,34 @@ public final class FleetState {
 
     public List<DecisionEntry> decisions(String planId) {
         return List.copyOf(decisionsByPlan.getOrDefault(planId, List.of()));
+    }
+
+    /**
+     * 记录一条全局时间线事件。同一 tick 内的最终顺序由
+     * {@link #timeline()} 的确定性排序保证，因此事件的真实到达线程不影响复盘结果。
+     */
+    public void timeline(String planId, long tick, String taskId, String robotId,
+                         TimelineKind kind, int attempt, String message) {
+        timeline.add(new TimelineEvent(++timelineSeq, tick, planId,
+                taskId == null ? "" : taskId,
+                robotId == null ? "" : robotId,
+                kind, attempt, message));
+    }
+
+    /** 全量时间线，按 (tick, 种类顺序, planId, taskId, seq) 确定性排序。 */
+    public List<TimelineEvent> timeline() {
+        List<TimelineEvent> copy = new ArrayList<>(timeline);
+        copy.sort(Comparator.comparingLong(TimelineEvent::tick)
+                .thenComparingInt(e -> e.kind().order())
+                .thenComparing(TimelineEvent::planId)
+                .thenComparing(TimelineEvent::taskId)
+                .thenComparingLong(TimelineEvent::seq));
+        return List.copyOf(copy);
+    }
+
+    /** 单个计划的时间线，排序规则与全量时间线一致。 */
+    public List<TimelineEvent> timeline(String planId) {
+        return timeline().stream().filter(e -> e.planId().equals(planId)).toList();
     }
 
     public PlanSnapshot snapshot(String planId) {

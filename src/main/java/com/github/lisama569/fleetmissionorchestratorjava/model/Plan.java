@@ -27,4 +27,14 @@ public record Plan(String planId,
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("no such task: " + taskId));
     }
+
+    /**
+     * 返回一份在本计划末尾追加新步骤后的新计划：planId 与 arrivalTick 保持不变，
+     * 原有步骤（规格、顺序）原样保留。用于“运行中追加步骤”被接受后的整体替换。
+     */
+    public Plan withAppendedTasks(List<TaskSpec> appended) {
+        List<TaskSpec> merged = new java.util.ArrayList<>(tasks);
+        merged.addAll(appended);
+        return new Plan(planId, arrivalTick, List.copyOf(merged));
+    }
 }
